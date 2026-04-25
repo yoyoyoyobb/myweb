@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>基金持仓涨幅跟踪 - 018156</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f5f7fa; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 16px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; font-size: 24px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }
+        .summary { background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
+        .fund-change { font-size: 32px; font-weight: bold; color: #dc2626; margin: 8px 0 4px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; background: #f1f5f9; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+        td { padding: 12px; border-bottom: 1px solid #e2e8f0; }
+        .change-positive { color: #dc2626; font-weight: 500; }
+        .change-negative { color: #16a34a; font-weight: 500; }
+        .status { background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 16px 0; border-radius: 8px; }
+        button { background-color: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500; margin-bottom: 20px; }
+        button:hover { background-color: #1d4ed8; }
+        .timestamp { color: #64748b; font-size: 14px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📈 创金合信全球医药生物(QDII)C (018156) 持仓跟踪</h1>
+    <button onclick="fetchAllData()">🔄 刷新数据</button>
+    <div id="status" class="status">
+        ⏳ 点击刷新按钮，获取最新持仓涨跌幅...
+    </div>
+    <div class="summary" id="summary">
+        <div>📊 前十大持仓覆盖比例：<strong>34.69%</strong></div>
+        <div style="margin-top: 12px;">📌 估算基金总涨幅：</div>
+        <div class="fund-change" id="totalChange">--</div>
+        <div style="font-size: 14px; color: #475569;" id="calculationDetail"></div>
+    </div>
+    <table id="holdingsTable">
+        <thead>
+            <tr><th>股票名称</th><th>代码</th><th>占净值比例</th><th>最新价</th><th>今日涨跌幅</th><th>加权贡献</th></tr>
+        </thead>
+        <tbody id="holdingsBody"></tbody>
+    </table>
+    <div class="timestamp" id="timestamp"></div>
+</div>
+
+<script>
+// 请替换为你自己的 Alpha Vantage API Key
+const ALPHA_VANTAGE_API_KEY = "YOUR_API_KEY_HERE";
+
+const holdings = [
+    { name: "Edgewise Therapeutics", symbol: "EWTX", weight: 4.59 },
+    { name: "Summit Therapeutics", symbol: "SMMT", weight: 4.52 },
+    { name: "AnaptysBio", symbol: "ANAB", weight: 3.97 },
+    { name: "Celcuity", symbol: "CELC", weight: 3.46 },
+    { name: "Protagonist Therapeutics", symbol: "PTGX", weight: 3.27 },
+    { name: "BioNTech", symbol: "BNTX", weight: 3.17 },
+    { name: "Nektar Therapeutics", symbol: "NKTR", weight: 3.17 },
+    { name: "NewAmsterdam Pharma", symbol: "NAMS", weight: 3.14 },
+    { name: "Cogent Biosciences", symbol: "COGT", weight: 2.86 },
+    { name: "Abivax", symbol: "ABVX", weight: 2.54 }
+];
+
+const knownWeightTotal = holdings.reduce((sum, h) => sum + h.weight, 0);
+const otherWeight = 100 - knownWeightTotal;  // 65.31%
+
+// 辅助函数：格式化百分比
+function formatPercent(value, decimals = 2) {
+    if (value === null || isNaN(value)) return "--";
+    return (value > 0 ? "+" : "") + value.toFixed(decimals) + "%";
+}
+
+// 显示刷新状态
+function setStatus(message, isError = false) {
+    const statusDiv = document.getElementById('status');
+    statusDiv.textContent = message;
+    statusDiv.style.backgroundColor = isError ? "#fee2e2" : "#fef3c7";
+    statusDiv.style.borderLeftColor = isError ? "#dc2626" : "#f59e0b";
+}
+
+// 从 Alpha Vantage 获取单只股票的实时涨跌幅
+async function fetchStockChange(symbol) {
+    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data["Global Quote"] && Object.keys(data["Global Quote"]).length > 0) {
+            const quote = data["Global Quote"];
+            const price = parseFloat(quote["05. price"]);
+            const changePercent = parseFloat(quote["10. change percent"].replace("%", ""));
+            return { price, changePercent, success: true };
+        } else {
+            console.warn(`No data for ${symbol}:`, data);
+            return { price: null, changePercent: null, success: false };
+        }
+    } catch (error) {
+        console.error(`Error fetching ${symbol}:`, error);
+        return { price: null, changePercent: null, success: false };
+    }
+}
+
+// 更新表格和汇总信息
+async function fetchAllData() {
+    setStatus("📡 正在获取所有持仓的实时涨跌幅，请稍候...");
+    
+    // 显示加载状态
+    const tbody = document.getElementById('holdingsBody');
+    tbody.innerHTML = '<tr><td colspan="6">加载中...</td></tr>';
+    
+    let results = [];
+    let totalWeightedContribution = 0;
+    
+    // 获取所有股票数据
+    for (const holding of holdings) {
+        const { price, changePercent, success } = await fetchStockChange(holding.symbol);
+        let weightedChange = null;
+        if (success && changePercent !== null) {
+            weightedChange = (changePercent / 100) * (holding.weight / 100) * 100;
+            totalWeightedContribution += weightedChange;
+        }
+        results.push({
+            ...holding,
+            price: price,
+            changePercent: changePercent,
+            weightedChange: weightedChange,
+            success: success
+        });
+    }
+    
+    // 剩余资产加权贡献（按其他资产涨跌幅 0% 简单估算）
+    const otherContribution = 0;  // (0 / 100) * (otherWeight / 100) * 100 = 0
+    
+    // 最终估算涨幅
+    const estimatedChange = totalWeightedContribution + otherContribution;
+    
+    // 更新表格
+    tbody.innerHTML = '';
+    for (const r of results) {
+        const row = tbody.insertRow();
+        row.insertCell(0).textContent = r.name;
+        row.insertCell(1).textContent = r.symbol;
+        row.insertCell(2).textContent = r.weight + "%";
+        row.insertCell(3).textContent = (r.price !== null && r.price !== undefined) ? `$${r.price.toFixed(2)}` : "--";
+        
+        const changeCell = row.insertCell(4);
+        if (r.success && r.changePercent !== null) {
+            changeCell.textContent = formatPercent(r.changePercent);
+            changeCell.className = r.changePercent >= 0 ? "change-positive" : "change-negative";
+        } else {
+            changeCell.textContent = "--";
+        }
+        
+        const weightedCell = row.insertCell(5);
+        if (r.weightedChange !== null) {
+            weightedCell.textContent = formatPercent(r.weightedChange, 4);
+            weightedCell.className = r.weightedChange >= 0 ? "change-positive" : "change-negative";
+        } else {
+            weightedCell.textContent = "--";
+        }
+    }
+    
+    // 显示汇总信息
+    const totalElement = document.getElementById('totalChange');
+    totalElement.textContent = formatPercent(estimatedChange);
+    totalElement.className = estimatedChange >= 0 ? "change-positive fund-change" : "change-negative fund-change";
+    
+    const detailElement = document.getElementById('calculationDetail');
+    detailElement.innerHTML = `前十大持仓加权: ${formatPercent(totalWeightedContribution, 4)}<br>剩余资产 (${otherWeight}%): 暂按 0% 估算<br><span style="font-size: 12px; color: #64748b;">⚠️ 剩余资产涨幅会显著影响最终值，本页面仅基于前十大持仓计算，实际净值以基金公司公告为准。</span>`;
+    
+    // 刷新时间
+    document.getElementById('timestamp').innerHTML = `数据更新时间: ${new Date().toLocaleString()} (涨跌幅数据来自 Alpha Vantage API)`;
+    
+    setStatus("✅ 数据刷新完成！(注：剩余资产暂按 0% 涨幅估算，仅供参考)");
+}
+
+// 页面初次加载时自动获取（可选，如需自动刷新请取消注释）
+// fetchAllData();
+
+// 手动点击刷新按钮触发 fetchAllData()
+</script>
+</body>
+</html>
